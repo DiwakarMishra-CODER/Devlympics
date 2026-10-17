@@ -1,17 +1,12 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
-import { Bot, FastForward, MessageSquareText, User, X } from "lucide-react";
-import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
-import { Callout } from "@/components/ui/Callout";
-import { Icon } from "@/components/ui/Icon";
-import { SeverityBadge } from "@/components/ui/SeverityBadge";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { IconCaseCard } from "@/components/phone/IconCaseCard";
-import { domainLabel, formatDateTime, formatRelative } from "@/lib/labels";
+import { MessageSquareText, PhoneCall, X } from "lucide-react";
+import { iconSpec } from "@/lib/icons";
+import { domainLabel, formatDateTime, formatRelative, humaniseProblemKey } from "@/lib/labels";
 import type { Case, Ticket } from "@/lib/types";
 import { cn } from "@/lib/cn";
+import { STATUS_META } from "./status";
 
 export interface CaseDetailDrawerProps {
   item: Case | null;
@@ -21,35 +16,22 @@ export interface CaseDetailDrawerProps {
   now: number;
 }
 
-function MetaRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+function Block({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-line/60 py-2 last:border-0">
-      <dt className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</dt>
-      <dd className="text-right text-sm text-ink">{children}</dd>
-    </div>
+    <section>
+      <h3 className="text-[0.7rem] font-bold uppercase tracking-[0.18em] text-muted">{title}</h3>
+      <div className="mt-2">{children}</div>
+    </section>
   );
 }
 
-/** Side panel with the full case file. Closes on Escape, backdrop click, or the X. */
-export function CaseDetailDrawer({
-  item,
-  onClose,
-  onFastForward,
-  followUpBusy,
-  now,
-}: CaseDetailDrawerProps) {
+/** The full case file. Closes on Escape, backdrop click, or the X; keeps Tab inside. */
+export function CaseDetailDrawer({ item, onClose, onFastForward, followUpBusy, now }: CaseDetailDrawerProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (!item) return;
-
     closeRef.current?.focus();
 
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -57,33 +39,27 @@ export function CaseDetailDrawer({
         onClose();
         return;
       }
-
-      // Keep Tab inside the dialog while it is open.
-      if (event.key === "Tab") {
-        const panel = panelRef.current;
-        if (!panel) return;
-        const focusables = panel.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])',
-        );
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        if (!first || !last) return;
-
-        const active = document.activeElement;
-        if (event.shiftKey && (active === first || !panel.contains(active))) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && (active === last || !panel.contains(active))) {
-          event.preventDefault();
-          first.focus();
-        }
+      if (event.key !== "Tab") return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusables = panel.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (!first || !last) return;
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !panel.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !panel.contains(active))) {
+        event.preventDefault();
+        first.focus();
       }
     };
     document.addEventListener("keydown", onKeyDown);
-
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-
     return () => {
       document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
@@ -92,229 +68,147 @@ export function CaseDetailDrawer({
 
   if (!item) return null;
 
-  const missing = <span className="text-muted">—</span>;
+  const meta = STATUS_META[item.status];
+  const StatusIcon = meta.icon;
   const sms = item.smsText.replaceAll("#TICKET", item.ticket);
+  const problem = item.problem || humaniseProblemKey(item.problemKey) || "Problem not recorded";
+  const canCall = item.status !== "resolved";
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
-      <div
-        className="absolute inset-0 bg-forest-900/40 backdrop-blur-sm"
-        onClick={onClose}
-        aria-hidden="true"
-      />
+      <div className="absolute inset-0 bg-ink/30 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
 
       <aside
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="case-drawer-title"
-        className="relative flex h-full w-full max-w-[560px] flex-col bg-ivory shadow-phone animate-fade-up"
+        className="relative flex h-full w-full max-w-[580px] flex-col bg-ivory shadow-phone animate-fade-up motion-reduce:animate-none"
       >
-        <header className="flex items-start justify-between gap-4 border-b border-line bg-white px-5 py-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
-              Case file
-            </p>
-            <h2
-              id="case-drawer-title"
-              className="mt-0.5 font-display text-3xl font-semibold tracking-[0.08em] text-forest-900"
-            >
-              {item.ticket}
-            </h2>
-            <p className="mt-1 text-sm text-ink-soft">
-              {item.name ?? "Unknown caller"}
-              {item.district ? ` · ${item.district}` : ""}
-            </p>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <StatusBadge status={item.status} />
-              <SeverityBadge severity={item.severity} />
-              <Badge tone="neutral">{domainLabel(item.domain, "en-IN")}</Badge>
-              {item.source === "seed" ? <Badge tone="saffron">Demo data</Badge> : null}
-              {item.ringNow ? <Badge tone="alert">Ringing</Badge> : null}
+        <header className="border-b border-line px-6 pb-5 pt-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-[0.7rem] font-bold uppercase tracking-[0.18em] text-muted">
+                Case <span className="font-mono tracking-wider text-ink">#{item.ticket}</span>
+                {item.source === "seed" ? <span className="text-saffron-700"> · Sample</span> : null}
+              </p>
+              <h2 id="case-drawer-title" className="mt-2 font-display text-[1.9rem] font-medium leading-tight text-ink">
+                {item.subject ? `${item.subject}: ` : ""}
+                {problem}
+              </h2>
+              <p className="mt-2 text-sm text-ink-soft">
+                {item.name ?? "Unnamed caller"} · {item.district ?? "District not given"} · {domainLabel(item.domain, "en-IN")} ·{" "}
+                {item.language === "hi-IN" ? "Hindi" : "English"}
+              </p>
             </div>
+            <button
+              ref={closeRef}
+              type="button"
+              onClick={onClose}
+              aria-label="Close case"
+              className="focus-ring grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-full border border-line bg-white text-ink hover:bg-ivory-50"
+            >
+              <X className="h-5 w-5" aria-hidden="true" />
+            </button>
           </div>
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={onClose}
-            aria-label="Close case details"
-            className="focus-ring grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line bg-white text-forest-700 hover:bg-ivory-50"
-          >
-            <Icon icon={X} size="md" />
-          </button>
+
+          <div className={cn("mt-4 flex items-center gap-3 rounded-2xl px-4 py-3", meta.tone)}>
+            <StatusIcon className="h-5 w-5 shrink-0" aria-hidden="true" />
+            <p className="text-sm">
+              <span className="font-bold">{meta.label}.</span> {meta.hint}
+              {item.severity === "high" ? <span className="font-bold"> · High severity</span> : null}
+            </p>
+          </div>
         </header>
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          <section aria-label="Case details">
-            <h3 className="text-xs font-bold uppercase tracking-[0.14em] text-muted">
-              Details
-            </h3>
-            <dl className="mt-2 rounded-2xl border border-line bg-white px-4 py-2">
-              <MetaRow label="Ticket">{item.ticket}</MetaRow>
-              <MetaRow label="Name">{item.name ?? missing}</MetaRow>
-              <MetaRow label="District">{item.district ?? missing}</MetaRow>
-              <MetaRow label="Domain">{domainLabel(item.domain, "en-IN")}</MetaRow>
-              <MetaRow label="Subject">{item.subject ?? missing}</MetaRow>
-              <MetaRow label="Problem">{item.problem || missing}</MetaRow>
-              <MetaRow label="Problem key">
-                <span className="font-mono text-xs">{item.problemKey}</span>
-              </MetaRow>
-              <MetaRow label="Language">{item.language}</MetaRow>
-            </dl>
-          </section>
-
-          {item.icons.length > 0 ? (
-            <section aria-label="Advice icons">
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-muted">
-                What the caller was told to do
-              </h3>
-              <IconCaseCard icons={item.icons} language="en-IN" />
-            </section>
+        <div className="flex-1 space-y-7 overflow-y-auto px-6 py-6">
+          {item.expertSummary ? (
+            <Block title="For the expert">
+              <p className="whitespace-pre-line rounded-2xl border border-alert-100 bg-white p-4 text-sm leading-relaxed text-ink">
+                {item.expertSummary}
+              </p>
+            </Block>
           ) : null}
 
-          <section aria-label="Advice given">
-            <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-muted">
-              Advice given
-            </h3>
+          <Block title="What Saathi advised">
             {item.advice ? (
-              <Callout tone="advice" title="AI-generated — not a diagnosis or prescription">
-                {item.advice}
-              </Callout>
+              <p className="text-base leading-relaxed text-ink">{item.advice}</p>
             ) : (
-              <p className="text-sm text-muted">No advice recorded.</p>
+              <p className="text-sm text-muted">No advice recorded yet.</p>
             )}
-          </section>
+            {item.icons.length > 0 ? (
+              <ul className="mt-3 flex flex-wrap gap-2" aria-label="Steps shown to the caller">
+                {item.icons.map((key) => (
+                  <li key={key} className="rounded-full border border-line bg-white px-3 py-1 text-xs font-semibold text-ink-soft">
+                    {iconSpec(key).labelEn}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <p className="mt-3 text-xs text-muted">AI-generated guidance, not a diagnosis or prescription.</p>
+          </Block>
 
-          <section aria-label="SMS summary">
-            <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-muted">
-              SMS summary
-            </h3>
-            {sms ? (
-              <p className="flex items-start gap-2 rounded-2xl border border-line bg-white p-4 text-sm leading-relaxed text-ink-soft [overflow-wrap:anywhere]">
-                <Icon icon={MessageSquareText} size="md" className="mt-0.5 shrink-0 text-muted" />
+          {sms ? (
+            <Block title="SMS sent to the caller">
+              <p className="flex items-start gap-3 rounded-2xl bg-white p-4 text-sm leading-relaxed text-ink-soft [overflow-wrap:anywhere]">
+                <MessageSquareText className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
                 {sms}
               </p>
-            ) : (
-              <p className="text-sm text-muted">No SMS recorded.</p>
-            )}
-          </section>
+            </Block>
+          ) : null}
 
-          <section aria-label="Expert summary">
-            <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-muted">
-              Expert summary
-            </h3>
-            {item.expertSummary ? (
-              <Callout tone="warning" title="Needs a human expert">
-                <span className="whitespace-pre-line">{item.expertSummary}</span>
-              </Callout>
-            ) : (
-              <p className="text-sm text-muted">
-                Not escalated — no expert summary recorded.
-              </p>
-            )}
-          </section>
-
-          <section aria-label="Conversation transcript">
-            <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-muted">
-              Transcript ({item.turns.length})
-            </h3>
+          <Block title={`Conversation (${item.turns.length})`}>
             {item.turns.length === 0 ? (
               <p className="text-sm text-muted">No conversation recorded.</p>
             ) : (
-              <ol className="space-y-2">
+              <ol className="space-y-3">
                 {item.turns.map((turn) => {
                   const isSaathi = turn.role === "saathi";
                   return (
-                    <li
-                      key={turn.id}
-                      className={cn("flex items-end gap-2", isSaathi ? "" : "flex-row-reverse")}
-                    >
-                      <span
-                        className={cn(
-                          "grid h-7 w-7 shrink-0 place-items-center rounded-full",
-                          isSaathi ? "bg-forest text-ivory" : "bg-sage-200 text-forest-700",
-                        )}
-                      >
-                        <Icon icon={isSaathi ? Bot : User} size="sm" />
+                    <li key={turn.id} className="grid grid-cols-[4.5rem_1fr] gap-3">
+                      <span className={cn("pt-0.5 text-xs font-bold uppercase tracking-wider", isSaathi ? "text-forest-700" : "text-saffron-700")}>
+                        {isSaathi ? "Saathi" : "Caller"}
                       </span>
-                      <span
-                        className={cn(
-                          "max-w-[80%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed [overflow-wrap:anywhere]",
-                          isSaathi
-                            ? "rounded-bl-sm bg-forest text-ivory"
-                            : "rounded-br-sm border border-line bg-white text-ink",
-                        )}
-                      >
+                      <span className="text-sm leading-relaxed text-ink [overflow-wrap:anywhere]">
                         {turn.text}
-                        <span
-                          className={cn(
-                            "mt-1 block text-[0.65rem]",
-                            isSaathi ? "text-ivory/60" : "text-muted",
-                          )}
-                        >
-                          {formatDateTime(turn.at)}
-                        </span>
+                        <span className="mt-0.5 block text-[0.7rem] text-muted">{formatDateTime(turn.at)}</span>
                       </span>
                     </li>
                   );
                 })}
               </ol>
             )}
-          </section>
+          </Block>
 
-          <section aria-label="Status and timestamps">
-            <h3 className="text-xs font-bold uppercase tracking-[0.14em] text-muted">
-              Status &amp; timestamps
-            </h3>
-            <dl className="mt-2 rounded-2xl border border-line bg-white px-4 py-2">
-              <MetaRow label="Status">
-                <span className="inline-flex items-center gap-2">
-                  <StatusBadge status={item.status} />
-                </span>
-              </MetaRow>
-              <MetaRow label="Created">
-                {formatDateTime(item.createdAt)}{" "}
-                <span className="text-muted">({formatRelative(item.createdAt, now)})</span>
-              </MetaRow>
-              <MetaRow label="Updated">
-                {formatDateTime(item.updatedAt)}{" "}
-                <span className="text-muted">({formatRelative(item.updatedAt, now)})</span>
-              </MetaRow>
-              <MetaRow label="Follow-up due">
-                {item.followUpAt ? formatDateTime(item.followUpAt) : missing}
-              </MetaRow>
-              <MetaRow label="Source">
-                {item.source === "seed" ? (
-                  <span className="text-saffron-700">Demo sample data</span>
-                ) : (
-                  "Live case"
-                )}
-              </MetaRow>
+          <Block title="Timeline">
+            <dl className="space-y-1.5 text-sm">
+              {[
+                ["Opened", `${formatDateTime(item.createdAt)} (${formatRelative(item.createdAt, now)})`],
+                ["Last update", `${formatDateTime(item.updatedAt)} (${formatRelative(item.updatedAt, now)})`],
+                ["Follow-up call", item.followUpAt ? formatDateTime(item.followUpAt) : "Not scheduled"],
+              ].map(([label, value]) => (
+                <div key={label} className="flex justify-between gap-4">
+                  <dt className="text-ink-soft">{label}</dt>
+                  <dd className="text-right text-ink">{value}</dd>
+                </div>
+              ))}
             </dl>
-          </section>
+          </Block>
         </div>
 
-        <footer className="border-t border-line bg-white px-5 py-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-muted">
-              Fast-forwarding schedules the follow-up call and sets{" "}
-              <span className="font-mono">ringNow</span>.
-            </p>
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={onClose}>
-                Close
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => onFastForward(item.ticket)}
-                disabled={followUpBusy || item.status === "resolved"}
-              >
-                <FastForward className="h-4 w-4" aria-hidden="true" />
-                {followUpBusy ? "Scheduling…" : "Fast-forward 3 days"}
-              </Button>
-            </div>
-          </div>
+        <footer className="flex items-center justify-between gap-3 border-t border-line bg-white px-6 py-4">
+          <p className="text-xs leading-snug text-muted">
+            {canCall ? "Rings the caller's phone now instead of in 3 days." : "This case is resolved."}
+          </p>
+          <button
+            type="button"
+            onClick={() => onFastForward(item.ticket)}
+            disabled={followUpBusy || !canCall}
+            className="focus-ring inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full bg-forest px-5 py-2.5 text-sm font-semibold text-ivory transition-colors duration-150 hover:bg-forest-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <PhoneCall className="h-4 w-4" aria-hidden="true" />
+            {followUpBusy ? "Calling…" : "Call back now"}
+          </button>
         </footer>
       </aside>
     </div>

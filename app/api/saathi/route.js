@@ -13,7 +13,7 @@ export async function POST(req) {
     return Response.json({ error: "BAD_REQUEST" }, { status: 400 });
   }
   const messages = buildMessages({ mode, language, history, caseContext });
-  const result = await askProviders(messages, (text) => parseAndClean(text, { mode, caseContext }));
+  const result = await askProviders(messages, (text) => parseAndClean(text, { mode, caseContext, language }));
   if (!result) return Response.json({ error: "ALL_PROVIDERS_FAILED" }, { status: 500 });
   console.log("answered by", result.provider);
   return Response.json(result.data, { headers: { "x-saathi-provider": result.provider } });

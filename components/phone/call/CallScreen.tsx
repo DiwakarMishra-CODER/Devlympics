@@ -8,8 +8,9 @@ import { CallHeader } from "./CallHeader";
 import { CallControls } from "./CallControls";
 import { CallTranscript } from "../CallTranscript";
 import { MicButton } from "../MicButton";
+import { Keypad } from "../Keypad";
 import { formatDuration, formatPhoneNumber } from "@/lib/phone/demo";
-import type { ConversationMessage } from "@/lib/types";
+import type { AppLanguage, ConversationMessage } from "@/lib/types";
 import type { CallPhase, TurnStatus } from "@/hooks/usePhoneCall";
 
 export interface CallScreenProps {
@@ -17,6 +18,9 @@ export interface CallScreenProps {
   turnStatus: TurnStatus;
   messages: readonly ConversationMessage[];
   liveTranscript: string;
+  language: AppLanguage;
+  /** First-call language menu is waiting for 1 (English) or 2 (Hindi). */
+  choosingLanguage: boolean;
   error: string | null;
   recognitionSupported: boolean;
   speaker: boolean;
@@ -25,6 +29,7 @@ export interface CallScreenProps {
   label: string;
   number: string;
   onEnd: () => void;
+  onChooseLanguage: (digit: string) => void;
   onListen: () => void;
   onStopListening: () => void;
   onRetry: () => void;
@@ -42,6 +47,8 @@ export function CallScreen({
   turnStatus,
   messages,
   liveTranscript,
+  language,
+  choosingLanguage,
   error,
   recognitionSupported,
   speaker,
@@ -50,6 +57,7 @@ export function CallScreen({
   label,
   number,
   onEnd,
+  onChooseLanguage,
   onListen,
   onStopListening,
   onRetry,
@@ -108,6 +116,32 @@ export function CallScreen({
     );
   }
 
+  if (choosingLanguage) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col bg-ivory">
+        <CallHeader label={label} number={pretty} status={`In call · ${formatDuration(elapsedMs)}`} />
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="rounded-2xl border border-line bg-white p-4 text-center shadow-soft">
+            <p className="text-base font-semibold text-forest-900">To continue in English, press 1</p>
+            <p className="mt-1.5 text-base font-semibold text-forest-900">हिंदी में बात करने के लिए 2 दबाइए</p>
+          </div>
+          <Keypad className="mt-5" language="en-IN" onDigit={onChooseLanguage} onBackspace={() => undefined} />
+        </div>
+
+        <div className="shrink-0 border-t border-line bg-ivory px-5 pb-5 pt-4">
+          <CallControls
+            muted={muted}
+            speaker={speaker}
+            onToggleMute={onToggleMute}
+            onToggleSpeaker={onToggleSpeaker}
+            onEnd={onEnd}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-ivory">
       <CallHeader label={label} number={pretty} status={`In call · ${formatDuration(elapsedMs)}`} />
@@ -117,7 +151,7 @@ export function CallScreen({
           messages={messages}
           liveTranscript={liveTranscript}
           turnStatus={turnStatus}
-          language="en-IN"
+          language={language}
         />
 
         {error ? (
@@ -164,7 +198,7 @@ export function CallScreen({
         <div className="flex flex-col items-center gap-4">
           <MicButton
             status={turnStatus}
-            language="en-IN"
+            language={language}
             disabled={!recognitionSupported || muted}
             onPress={turnStatus === "listening" ? onStopListening : onListen}
           />

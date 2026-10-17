@@ -76,7 +76,7 @@ async function listCases(filter?: CaseFilter): Promise<Case[]> {
 
 /**
  * Real implementation of `SaathiService`: Supabase via lib/db.js for data,
- * /api/saathi via lib/ai.js for the AI. Mirrors lib/mock/service.ts behaviour.
+ * /api/saathi via lib/ai.js for the AI.
  */
 export function createSupabaseService(): SaathiService {
   return {

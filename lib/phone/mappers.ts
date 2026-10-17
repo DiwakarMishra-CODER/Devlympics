@@ -139,6 +139,39 @@ export function ticketSpeech(ticket: string, language: AppLanguage): string {
   return `आपका टिकट नंबर है, ${words}।`;
 }
 
+/** Asked after the caller goes quiet following an answer. */
+export function anythingMoreLine(language: AppLanguage): string {
+  return language === "hi-IN" ? "क्या आप कुछ और पूछना चाहते हैं?" : "Do you want to ask anything more?";
+}
+
+export function goAheadLine(language: AppLanguage): string {
+  return language === "hi-IN" ? "ठीक है, बताइए।" : "Okay, please go ahead.";
+}
+
+/** Ticket read out twice so the caller can write it down before the call ends. */
+export function closingLine(ticket: string, language: AppLanguage): string {
+  const first = ticketSpeech(ticket, language);
+  if (language === "en-IN") {
+    return `${first} I repeat, ${ticket.split("").join(", ")}. Please note it down for the future. Thank you!`;
+  }
+  const words = ticket.split("").map((digit) => DIGIT_WORDS_HI[digit] ?? digit).join(", ");
+  return `${first} दोबारा, ${words}। इसे आगे के लिए लिख लीजिए। धन्यवाद!`;
+}
+
+export type YesNo = "yes" | "no" | "other";
+
+/**
+ * Reads a short spoken answer to "anything more?". Longer sentences count as
+ * "other" so a real follow-up question is never swallowed as yes/no.
+ */
+export function classifyYesNo(text: string): YesNo {
+  const value = text.trim().toLowerCase();
+  if (!value || value.split(/\s+/).length > 4) return "other";
+  if (/\b(no|nope|nothing|nahi|nahin|nai|bas)\b|नहीं|नही|बस|कुछ नहीं/.test(value)) return "no";
+  if (/\b(yes|yeah|yep|haan|han|haa|ha|ji)\b|हाँ|हां|जी/.test(value)) return "yes";
+  return "other";
+}
+
 export interface TicketLookupProblem {
   message: string;
 }

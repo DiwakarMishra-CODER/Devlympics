@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, Mukta } from "next/font/google";
+import { Fraunces, JetBrains_Mono, Mukta, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 
 /**
@@ -18,6 +18,19 @@ const displayFont = Fraunces({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-display",
+  display: "swap",
+});
+
+/** Landing-page voices: a bold grotesk for headlines, a mono for labels. */
+const groteskFont = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-grotesk",
+  display: "swap",
+});
+
+const codeFont = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-code",
   display: "swap",
 });
 
@@ -43,7 +56,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${bodyFont.variable} ${displayFont.variable}`}
+      className={`${bodyFont.variable} ${displayFont.variable} ${groteskFont.variable} ${codeFont.variable}`}
     >
       <body className="min-h-dvh bg-ivory text-ink">{children}</body>
     </html>

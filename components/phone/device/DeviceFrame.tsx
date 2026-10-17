@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { StatusBar } from "./StatusBar";
+import { BackLink } from "@/components/ui/BackLink";
 import { cn } from "@/lib/cn";
 
 export interface DeviceFrameProps {
@@ -25,6 +26,9 @@ export function DeviceFrame({ children, statusTone = "light", className }: Devic
         aria-hidden="true"
         className="pointer-events-none absolute -bottom-24 -left-24 hidden h-96 w-96 rounded-full bg-saffron/10 blur-3xl sm:block"
       />
+
+      {/* Outside the handset; on a real phone the frame is edge-to-edge, so it's hidden there. */}
+      <BackLink href="/phone" label="Switch phone" tone="light" className="absolute left-4 top-4 z-10 hidden sm:inline-flex" />
 
       <div className={cn("relative w-full max-w-[420px]", className)}>
         <div className="bg-transparent p-0 sm:rounded-[2.75rem] sm:border sm:border-white/10 sm:bg-forest-800 sm:p-2.5 sm:shadow-phone">

@@ -17,6 +17,8 @@ export interface UseDashboard {
   status: DashboardStatus;
   loading: boolean;
   cases: readonly Case[];
+  /** When the last live snapshot arrived (ms since epoch), for the "updated Xs ago" label. */
+  updatedAt: number | null;
   stats: DashboardStats;
   alerts: DashboardAlert[];
   seedCount: number;
@@ -39,6 +41,7 @@ export interface UseDashboard {
 export function useDashboard(): UseDashboard {
   const [status, setStatus] = useState<DashboardStatus>("loading");
   const [cases, setCases] = useState<readonly Case[]>([]);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [flashing, setFlashing] = useState<ReadonlySet<Ticket>>(() => new Set());
   const [actionBusy, setActionBusy] = useState<DashboardAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -56,6 +59,7 @@ export function useDashboard(): UseDashboard {
     const onSnapshot = (next: readonly Case[]): void => {
       if (!mountedRef.current) return;
       setCases(next);
+      setUpdatedAt(Date.now());
       setStatus("ready");
       setStreamError(null);
 
@@ -184,6 +188,7 @@ export function useDashboard(): UseDashboard {
       status,
       loading: status === "loading",
       cases,
+      updatedAt,
       stats,
       alerts,
       seedCount,
@@ -200,6 +205,7 @@ export function useDashboard(): UseDashboard {
     [
       status,
       cases,
+      updatedAt,
       stats,
       alerts,
       seedCount,

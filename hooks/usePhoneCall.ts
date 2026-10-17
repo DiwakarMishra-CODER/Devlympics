@@ -12,17 +12,21 @@ import {
   type RecognizerHandle,
 } from "@/lib/speech";
 import {
+  anythingMoreLine,
   buildSms,
   caseContextFromCase,
+  classifyYesNo,
+  closingLine,
   createMessage,
   fallbackLine,
   followUpOpening,
+  goAheadLine,
   greetingFor,
   networkErrorLine,
   normaliseTicket,
   responseToCreateInput,
-  ticketSpeech,
   toChatHistory,
+  toNewTurns,
 } from "@/lib/phone/mappers";
 import {
   CALL_RING_MS,
@@ -62,6 +66,13 @@ export interface EndedCallInfo {
 /** Hard stop so a confused caller never loops forever. */
 const MAX_USER_TURNS = 6;
 
+/** IVR-style language menu played when a first call connects; each line in its own voice. */
+const LANGUAGE_MENU: ReadonlyArray<{ text: string; lang: AppLanguage }> = [
+  { text: "To continue in English, press 1.", lang: "en-IN" },
+  { text: "हिंदी में बात करने के लिए 2 दबाइए।", lang: "hi-IN" },
+];
+const MENU_DIGITS: Readonly<Record<string, AppLanguage>> = { "1": "en-IN", "2": "hi-IN" };
+
 let callSeq = 0;
 
 export interface UsePhoneCall {
@@ -70,6 +81,8 @@ export interface UsePhoneCall {
   direction: CallDirection;
   turnStatus: TurnStatus;
   language: AppLanguage;
+  /** True while the first-call language menu is waiting for 1 or 2. */
+  choosingLanguage: boolean;
   messages: readonly ConversationMessage[];
   liveTranscript: string;
   error: string | null;
@@ -88,6 +101,7 @@ export interface UsePhoneCall {
   startOutgoingCall: (number: string) => void;
   startFollowUp: (item: Case) => void;
   answer: () => void;
+  chooseLanguage: (digit: string) => void;
   endCall: () => void;
   declineCall: () => void;
   listen: () => void;
@@ -113,6 +127,7 @@ export function usePhoneCall(): UsePhoneCall {
   const [direction, setDirection] = useState<CallDirection>("outgoing");
   const [turnStatus, setTurnStatus] = useState<TurnStatus>("idle");
   const [language, setLanguageState] = useState<AppLanguage>("en-IN");
+  const [choosingLanguage, setChoosingLanguage] = useState(false);
   const [messages, setMessages] = useState<readonly ConversationMessage[]>([]);
   const [liveTranscript, setLiveTranscript] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -126,6 +141,7 @@ export function usePhoneCall(): UsePhoneCall {
   const [endedCall, setEndedCall] = useState<EndedCallInfo | null>(null);
 
   const languageRef = useRef<AppLanguage>(language);
+  const choosingRef = useRef(false);
   const screenRef = useRef<PhoneScreen>(screen);
   const callPhaseRef = useRef<CallPhase>(callPhase);
   const directionRef = useRef<CallDirection>(direction);
@@ -148,6 +164,16 @@ export function usePhoneCall(): UsePhoneCall {
   const busyRef = useRef(false);
   const aliveRef = useRef(true);
   const pendingRingRef = useRef<Case | null>(null);
+  /** Latest AI answer this call; a case is saved from it if the caller says "no more". */
+  const lastResponseRef = useRef<AskResponse | null>(null);
+  /** The case saved during this call (created once, then updated). */
+  const savedCaseRef = useRef<Case | null>(null);
+  /** How many transcript messages are already stored on the case. */
+  const savedTurnsRef = useRef(0);
+  /** True after "anything more?" was asked and we're waiting for yes/no. */
+  const closingRef = useRef(false);
+  const silenceRef = useRef<() => void>(() => undefined);
+  const wrapUpRef = useRef<() => void>(() => undefined);
 
   // Capability detection only ever changes on a real client, so resolve it once.
   const recognitionSupported = useMemo(() => isSpeechRecognitionSupported(), []);
@@ -234,6 +260,12 @@ export function usePhoneCall(): UsePhoneCall {
     turnCountRef.current = 0;
     callStartRef.current = null;
     busyRef.current = false;
+    choosingRef.current = false;
+    setChoosingLanguage(false);
+    lastResponseRef.current = null;
+    savedCaseRef.current = null;
+    savedTurnsRef.current = 0;
+    closingRef.current = false;
     setElapsedMs(0);
   }, [stopAllMedia]);
 
@@ -288,13 +320,6 @@ export function usePhoneCall(): UsePhoneCall {
       setCallPhase("idle");
       setTurnStatus("idle");
       setScreen("ticket");
-      if (variant === "new" && isSpeechSynthesisSupported()) {
-        stopSpeakRef.current = speak(ticketSpeech(item.ticket, languageRef.current), languageRef.current, {
-          onEnd: () => {
-            stopSpeakRef.current = null;
-          },
-        });
-      }
     },
     [recordEnded, stopAllMedia],
   );
@@ -302,34 +327,63 @@ export function usePhoneCall(): UsePhoneCall {
   const persistResponse = useCallback(
     async (response: AskResponse, lang: AppLanguage): Promise<Case> => {
       const services = getServices();
+      const pending = messagesRef.current.slice(savedTurnsRef.current);
+      const existing = savedCaseRef.current;
+      let saved: Case;
 
-      if (modeRef.current === "first_call") {
+      if (modeRef.current === "first_call" && !existing) {
         const input = responseToCreateInput(response, lang, messagesRef.current);
         const created = await services.createCase(input);
-        if (created.smsText.includes("#TICKET")) {
-          return services.updateCase(created.ticket, { smsText: buildSms(created) });
-        }
-        return created;
+        saved = created.smsText.includes("#TICKET")
+          ? await services.updateCase(created.ticket, { smsText: buildSms(created) })
+          : created;
+        savedTurnsRef.current = messagesRef.current.length;
+        savedCaseRef.current = saved;
+        return saved;
       }
 
-      const ticket = ticketRef.current;
-      if (!ticket) throw new Error("Follow-up response without a ticket");
-      if (response.resolved === true) {
-        return services.resolveFollowUp(ticket, { resolved: true });
-      }
-      if (response.resolved === false) {
-        return services.resolveFollowUp(ticket, {
-          resolved: false,
-          expertSummary: response.expertSummary,
+      if (modeRef.current === "first_call" && existing) {
+        // The caller kept talking after the case was opened: update it, don't open another.
+        const input = responseToCreateInput(response, lang, []);
+        saved = await services.updateCase(existing.ticket, {
+          name: input.name ?? existing.name,
+          district: input.district ?? existing.district,
+          domain: input.domain,
+          subject: input.subject ?? existing.subject,
+          problem: input.problem,
+          problemKey: input.problemKey,
+          severity: input.severity,
+          status: input.status,
+          advice: input.advice,
+          smsText: (input.smsText ?? "").replaceAll("#TICKET", existing.ticket),
+          icons: input.icons,
+          expertSummary: input.expertSummary ?? existing.expertSummary,
         });
+      } else {
+        const ticket = ticketRef.current;
+        if (!ticket) throw new Error("Follow-up response without a ticket");
+        if (response.resolved === true) {
+          saved = await services.resolveFollowUp(ticket, { resolved: true });
+        } else if (response.resolved === false) {
+          saved = await services.resolveFollowUp(ticket, {
+            resolved: false,
+            expertSummary: response.expertSummary,
+          });
+        } else {
+          saved = await services.escalateCase(ticket, response.expertSummary ?? undefined);
+        }
       }
-      return services.escalateCase(ticket, response.expertSummary ?? undefined);
+
+      if (pending.length) await services.appendTurns(saved.ticket, toNewTurns(pending));
+      savedTurnsRef.current = messagesRef.current.length;
+      savedCaseRef.current = saved;
+      return saved;
     },
     [],
   );
 
   const beginListening = useCallback((): void => {
-    if (busyRef.current) return;
+    if (busyRef.current || choosingRef.current) return;
     if (callPhaseRef.current !== "in_call") return;
     if (mutedRef.current) return;
 
@@ -358,6 +412,10 @@ export function usePhoneCall(): UsePhoneCall {
         onError: (code) => {
           if (code === "aborted") return;
           handled = true;
+          if (code === "no-speech" && lastResponseRef.current) {
+            silenceRef.current();
+            return;
+          }
           setTurnStatus("error");
           setError(
             code === "not-allowed"
@@ -371,6 +429,10 @@ export function usePhoneCall(): UsePhoneCall {
           recognizerRef.current = null;
           if (handled) return;
           const text = collected.trim();
+          if (!text && lastResponseRef.current) {
+            silenceRef.current();
+            return;
+          }
           if (!text) {
             setTurnStatus("error");
             setError(fallbackLine(lang));
@@ -379,22 +441,19 @@ export function usePhoneCall(): UsePhoneCall {
           submitRef.current(text);
         },
       },
-      { silenceMs: 8000 },
+      { silenceMs: 7000 },
     );
 
     recognizerRef.current = handle;
   }, []);
 
-  const answer = useCallback((): void => {
-    if (ringTimerRef.current !== null) {
-      clearTimeout(ringTimerRef.current);
-      ringTimerRef.current = null;
-    }
-    callStartRef.current = Date.now();
-    setCallPhase("in_call");
-    callPhaseRef.current = "in_call";
-    setError(null);
+  const applyLanguage = useCallback((next: AppLanguage): void => {
+    languageRef.current = next;
+    setLanguageState(next);
+  }, []);
 
+  /** Greets in the current language, then starts listening. */
+  const openConversation = useCallback((): void => {
     const lang = languageRef.current;
     const item = followUpCaseRef.current;
     const opening =
@@ -411,13 +470,79 @@ export function usePhoneCall(): UsePhoneCall {
     });
   }, [appendMessage, beginListening, speakText]);
 
+  const answer = useCallback((): void => {
+    if (ringTimerRef.current !== null) {
+      clearTimeout(ringTimerRef.current);
+      ringTimerRef.current = null;
+    }
+    callStartRef.current = Date.now();
+    setCallPhase("in_call");
+    callPhaseRef.current = "in_call";
+    setError(null);
+
+    // Follow-ups continue in the language the case was opened in.
+    const item = followUpCaseRef.current;
+    if (modeRef.current === "follow_up" && item) {
+      applyLanguage(item.language);
+      openConversation();
+      return;
+    }
+
+    // First calls ask for a language before anything else.
+    choosingRef.current = true;
+    setChoosingLanguage(true);
+    void (async () => {
+      for (const line of LANGUAGE_MENU) {
+        if (!aliveRef.current || !choosingRef.current) return;
+        await speakText(line.text, line.lang);
+      }
+      if (aliveRef.current && choosingRef.current) setTurnStatus("idle");
+    })();
+  }, [applyLanguage, openConversation, speakText]);
+
+  const chooseLanguage = useCallback(
+    (digit: string): void => {
+      const next = MENU_DIGITS[digit];
+      if (!choosingRef.current || !next) return;
+      choosingRef.current = false;
+      setChoosingLanguage(false);
+      // Cut the menu short if they pressed before it finished.
+      stopSpeakRef.current?.();
+      stopSpeakRef.current = null;
+      cancelSpeech();
+      applyLanguage(next);
+      openConversation();
+    },
+    [applyLanguage, openConversation],
+  );
+
   const submitUtterance = useCallback(
     async (raw: string): Promise<void> => {
       const text = raw.trim();
-      if (!text || busyRef.current) return;
+      if (!text || busyRef.current || choosingRef.current) return;
       if (callPhaseRef.current !== "in_call") return;
 
       const lang = languageRef.current;
+
+      if (closingRef.current) {
+        closingRef.current = false;
+        const verdict = classifyYesNo(text);
+        if (verdict === "no") {
+          appendMessage("user", text);
+          wrapUpRef.current();
+          return;
+        }
+        if (verdict === "yes") {
+          appendMessage("user", text);
+          const line = goAheadLine(lang);
+          appendMessage("saathi", line);
+          await speakText(line, lang);
+          if (aliveRef.current) beginListening();
+          return;
+        }
+        // Anything else is a new question: carry on with it.
+      }
+
       busyRef.current = true;
 
       appendMessage("user", text);
@@ -454,6 +579,7 @@ export function usePhoneCall(): UsePhoneCall {
 
       appendMessage("saathi", response.reply);
       chatRef.current = [...chatRef.current, { role: "assistant", content: response.reply }];
+      lastResponseRef.current = response;
 
       const safetyStop = turnCountRef.current >= MAX_USER_TURNS;
       const done = response.done || safetyStop;
@@ -481,14 +607,15 @@ export function usePhoneCall(): UsePhoneCall {
       await speakText(response.reply, lang);
       if (!aliveRef.current) return;
 
-      if (created) {
-        finishCall(created, "new");
+      // A saved case doesn't end the call: it stays open until the caller has nothing more.
+      if (safetyStop) {
+        wrapUpRef.current();
         return;
       }
 
       beginListening();
     },
-    [appendMessage, beginListening, finishCall, persistResponse, speakText],
+    [appendMessage, beginListening, persistResponse, speakText],
   );
 
   useEffect(() => {
@@ -547,6 +674,8 @@ export function usePhoneCall(): UsePhoneCall {
   const endCall = useCallback((): void => {
     stopAllMedia();
     busyRef.current = false;
+    choosingRef.current = false;
+    setChoosingLanguage(false);
     recordEnded({ missed: false, ticket: activeCase ? activeCase.ticket : null });
     setCallPhase("idle");
     setTurnStatus("idle");
@@ -559,9 +688,67 @@ export function usePhoneCall(): UsePhoneCall {
     setScreen("ended");
   }, [activeCase, recordEnded, stopAllMedia]);
 
+  /** Caller said "no more" (or stayed silent twice): save, read the ticket out twice, end. */
+  const wrapUp = useCallback(async (): Promise<void> => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    closingRef.current = false;
+    recognizerRef.current?.abort();
+    recognizerRef.current = null;
+    setTurnStatus("processing");
+    const lang = languageRef.current;
+
+    let item = savedCaseRef.current;
+    try {
+      if (lastResponseRef.current && (!item || savedTurnsRef.current < messagesRef.current.length)) {
+        item = await persistResponse(lastResponseRef.current, lang);
+      }
+    } catch {
+      // Keep whatever was saved earlier; the ticket still exists.
+    }
+    if (!aliveRef.current) return;
+    busyRef.current = false;
+
+    if (!item) {
+      endCall();
+      return;
+    }
+
+    const line = closingLine(item.ticket, lang);
+    appendMessage("saathi", line);
+    await speakText(line, lang);
+    if (!aliveRef.current || callPhaseRef.current !== "in_call") return;
+    finishCall(item, modeRef.current === "first_call" ? "new" : "saved");
+  }, [appendMessage, endCall, finishCall, persistResponse, speakText]);
+
+  /** Caller went quiet after an answer: ask once, then wrap up on a second silence. */
+  const handleSilence = useCallback((): void => {
+    if (closingRef.current) {
+      void wrapUp();
+      return;
+    }
+    closingRef.current = true;
+    const lang = languageRef.current;
+    const line = anythingMoreLine(lang);
+    appendMessage("saathi", line);
+    void speakText(line, lang).then(() => {
+      if (!aliveRef.current || callPhaseRef.current !== "in_call") return;
+      beginListening();
+    });
+  }, [appendMessage, beginListening, speakText, wrapUp]);
+
+  useEffect(() => {
+    silenceRef.current = handleSilence;
+    wrapUpRef.current = () => {
+      void wrapUp();
+    };
+  }, [handleSilence, wrapUp]);
+
   const declineCall = useCallback((): void => {
     stopAllMedia();
     busyRef.current = false;
+    choosingRef.current = false;
+    setChoosingLanguage(false);
     recordEnded({ missed: true, ticket: null, durationMs: 0 });
     setCallPhase("idle");
     setTurnStatus("idle");
@@ -710,6 +897,7 @@ export function usePhoneCall(): UsePhoneCall {
       direction,
       turnStatus,
       language,
+      choosingLanguage,
       messages,
       liveTranscript,
       error,
@@ -727,6 +915,7 @@ export function usePhoneCall(): UsePhoneCall {
       startOutgoingCall,
       startFollowUp,
       answer,
+      chooseLanguage,
       endCall,
       declineCall,
       listen,
@@ -746,6 +935,7 @@ export function usePhoneCall(): UsePhoneCall {
       direction,
       turnStatus,
       language,
+      choosingLanguage,
       messages,
       liveTranscript,
       error,
@@ -763,6 +953,7 @@ export function usePhoneCall(): UsePhoneCall {
       startOutgoingCall,
       startFollowUp,
       answer,
+      chooseLanguage,
       endCall,
       declineCall,
       listen,

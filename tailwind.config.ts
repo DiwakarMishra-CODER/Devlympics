@@ -69,6 +69,8 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-body)", "system-ui", "sans-serif"],
         display: ["var(--font-display)", "var(--font-body)", "serif"],
+        grotesk: ["var(--font-grotesk)", "var(--font-body)", "sans-serif"],
+        code: ["var(--font-code)", "ui-monospace", "monospace"],
       },
       borderRadius: {
         xl2: "1.25rem",
@@ -77,6 +79,8 @@ const config: Config = {
         soft: "0 1px 2px rgba(23, 63, 50, 0.05), 0 10px 28px -16px rgba(23, 63, 50, 0.22)",
         lift: "0 2px 4px rgba(23, 63, 50, 0.06), 0 20px 44px -22px rgba(23, 63, 50, 0.30)",
         phone: "0 30px 70px -24px rgba(14, 38, 32, 0.55)",
+        hard: "6px 6px 0 0 #0E2620",
+        "hard-sm": "3px 3px 0 0 #0E2620",
       },
       letterSpacing: {
         tightish: "-0.01em",
@@ -96,11 +100,21 @@ const config: Config = {
           "60%": { backgroundColor: "rgba(217, 164, 65, 0.18)" },
           "100%": { backgroundColor: "rgba(217, 164, 65, 0)" },
         },
+        marquee: {
+          "0%": { transform: "translateX(0)" },
+          "100%": { transform: "translateX(-50%)" },
+        },
+        "bubble-in": {
+          "0%": { opacity: "0", transform: "translateY(10px) scale(0.96)" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
       },
       animation: {
         "fade-up": "fade-up 0.35s ease-out both",
         "pulse-ring": "pulse-ring 1.8s cubic-bezier(0.2, 0.6, 0.4, 1) infinite",
         "row-flash": "row-flash 2s ease-out both",
+        marquee: "marquee 40s linear infinite",
+        "bubble-in": "bubble-in 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both",
       },
     },
   },
