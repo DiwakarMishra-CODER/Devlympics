@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-ivory font-sans text-ink antialiased;
+    font-feature-settings: "kern" 1, "liga" 1;
+  }
+
+  /* Warm, high-contrast selection using the single accent colour. */
+  ::selection {
+    background: #d9a441;
+    color: #0e2620;
+  }
+
+  /*
+   * Global accessible focus fallback. Interactive primitives (Button, links,
+   * chips) opt into a ring and suppress this outline; everything else keeps a
+   * visible saffron outline so keyboard users are never lost.
+   */
+  :focus-visible {
+    outline: 2px solid #d9a441;
+    outline-offset: 2px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-display tracking-tightish text-forest-900;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+}
+
+@layer utilities {
+  /* Shared accessible ring for custom interactive elements. */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-saffron focus-visible:ring-offset-2 focus-visible:ring-offset-ivory;
+  }
+
+  /* A restrained paper-like texture for large brand surfaces. */
+  .paper-grid {
+    background-image: radial-gradient(rgba(23, 63, 50, 0.06) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  /* Warm, calm wallpaper for the simulated phone home screen. */
+  .device-wallpaper {
+    background-color: #123029;
+    background-image:
+      radial-gradient(circle at 22% 12%, rgba(217, 164, 65, 0.20), transparent 46%),
+      radial-gradient(circle at 82% 82%, rgba(35, 96, 78, 0.55), transparent 58%),
+      radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: auto, auto, 22px 22px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
